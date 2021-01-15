@@ -34,6 +34,8 @@ import org.apache.flink.table.sinks.TableSink;
 import org.apache.flink.types.Row;
 
 import java.util.List;
+import java.util.Objects;
+
 /**
  * @author yanxi
  */
@@ -65,7 +67,13 @@ public class RedisSink implements RetractStreamTableSink<Row>, IStreamSinkGener<
 
     protected String masterName;
 
-    public RedisSink(){
+    protected Integer parallelism = 1;
+
+    protected String registerTableName;
+
+    protected int keyExpiredTime;
+
+    public RedisSink() {
 
     }
 
@@ -83,6 +91,10 @@ public class RedisSink implements RetractStreamTableSink<Row>, IStreamSinkGener<
         this.minIdle = redisTableInfo.getMinIdle();
         this.masterName = redisTableInfo.getMasterName();
         this.timeout = redisTableInfo.getTimeout();
+        this.parallelism = Objects.isNull(redisTableInfo.getParallelism()) ?
+                parallelism : redisTableInfo.getParallelism();
+        this.registerTableName = redisTableInfo.getName();
+        this.keyExpiredTime = redisTableInfo.getKeyExpiredTime();
         return this;
     }
 
@@ -92,14 +104,9 @@ public class RedisSink implements RetractStreamTableSink<Row>, IStreamSinkGener<
     }
 
     @Override
-    public void emitDataStream(DataStream<Tuple2<Boolean, Row>> dataStream) {
-        consumeDataStream(dataStream);
-    }
-
-    @Override
     public DataStreamSink<Tuple2<Boolean, Row>> consumeDataStream(DataStream<Tuple2<Boolean, Row>> dataStream) {
         RedisOutputFormat.RedisOutputFormatBuilder builder = RedisOutputFormat.buildRedisOutputFormat();
-        builder.setUrl(this.url)
+        RedisOutputFormat redisOutputFormat = builder.setUrl(this.url)
                 .setDatabase(this.database)
                 .setTableName(this.tableName)
                 .setPassword(this.password)
@@ -111,10 +118,13 @@ public class RedisSink implements RetractStreamTableSink<Row>, IStreamSinkGener<
                 .setMaxTotal(this.maxTotal)
                 .setMaxIdle(this.maxIdle)
                 .setMinIdle(this.minIdle)
-                .setMasterName(this.masterName);
-        RedisOutputFormat redisOutputFormat = builder.finish();
+                .setMasterName(this.masterName)
+                .setKeyExpiredTime(this.keyExpiredTime)
+                .finish();
         RichSinkFunction richSinkFunction = new OutputFormatSinkFunction(redisOutputFormat);
-        DataStreamSink dataStreamSink = dataStream.addSink(richSinkFunction);
+        DataStreamSink dataStreamSink = dataStream.addSink(richSinkFunction)
+                .setParallelism(parallelism)
+                .name(registerTableName);
         return dataStreamSink;
     }
 

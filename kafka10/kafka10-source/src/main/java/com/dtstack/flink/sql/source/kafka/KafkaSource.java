@@ -27,7 +27,7 @@ import org.apache.flink.streaming.api.datastream.DataStreamSource;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.connectors.kafka.FlinkKafkaConsumer010;
 import org.apache.flink.table.api.Table;
-import org.apache.flink.table.api.java.StreamTableEnvironment;
+import org.apache.flink.table.api.bridge.java.StreamTableEnvironment;
 import org.apache.flink.types.Row;
 
 import java.util.Properties;
@@ -55,7 +55,7 @@ public class KafkaSource extends AbstractKafkaSource {
         DataStreamSource kafkaSource = env.addSource(kafkaSrc, sourceOperatorName, typeInformation);
 
         setParallelism(kafkaSourceTableInfo.getParallelism(), kafkaSource);
-        setStartPosition(kafkaSourceTableInfo.getOffsetReset(), topicName, kafkaSrc);
+        setStartPosition(kafkaSourceTableInfo.getOffsetReset(), topicName, kafkaSrc, () -> kafkaSrc.setStartFromTimestamp(kafkaSourceTableInfo.getTimestampOffset()));
         String fields = StringUtils.join(kafkaSourceTableInfo.getFields(), ",");
 
         return tableEnv.fromDataStream(kafkaSource, fields);

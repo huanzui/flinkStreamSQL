@@ -25,6 +25,7 @@ import com.dtstack.flink.sql.table.AbstractTargetTableInfo;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.Maps;
 
+import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
@@ -69,6 +70,10 @@ public class HbaseTableInfo extends AbstractTargetTableInfo {
     private String clientPrincipal;
 
     private String clientKeytabFile;
+
+    private String batchSize;
+
+    private String batchWaitInterval;
 
     private Map<String,Object> hbaseConfig = Maps.newHashMap();
 
@@ -232,4 +237,19 @@ public class HbaseTableInfo extends AbstractTargetTableInfo {
         this.clientKeytabFile = clientKeytabFile;
     }
 
+    public String getBatchSize() {
+        return batchSize;
+    }
+
+    public void setBatchSize(String batchSize) {
+        this.batchSize = batchSize;
+    }
+
+    public String getBatchWaitInterval() {
+        return batchWaitInterval;
+    }
+
+    public void setBatchWaitInterval(String batchWaitInterval) {
+        this.batchWaitInterval = batchWaitInterval;
+    }
 }

@@ -20,13 +20,12 @@
 
 package com.dtstack.flink.sql.util;
 
-import com.dtstack.flink.sql.classloader.DtClassLoader;
 import com.dtstack.flink.sql.enums.EPluginLoadMode;
-import org.apache.commons.lang3.StringUtils;
 import com.fasterxml.jackson.core.JsonGenerationException;
 import com.fasterxml.jackson.core.JsonParseException;
 import com.fasterxml.jackson.databind.JsonMappingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -123,6 +122,16 @@ public class PluginUtil {
     public static String getSqlSideClassName(String pluginTypeName, String type, String operatorType){
         String pluginClassName = upperCaseFirstChar(pluginTypeName) + operatorType + "ReqRow";
         return CLASS_PRE_STR  + "." + type.toLowerCase() + "." +  pluginTypeName + "." + pluginClassName;
+    }
+
+    public static String getTableFunctionClassName(String pluginTypeName, String type) {
+        String pluginClassName = upperCaseFirstChar(pluginTypeName) + "TableFunction";
+        return CLASS_PRE_STR + "." + type.toLowerCase() + "." + pluginTypeName + ".table." + pluginClassName;
+    }
+
+    public static String getAsyncTableFunctionClassName(String pluginTypeName, String type) {
+        String pluginClassName = upperCaseFirstChar(pluginTypeName) + "AsyncTableFunction";
+        return CLASS_PRE_STR + "." + type.toLowerCase() + "." + pluginTypeName + ".table." + pluginClassName;
     }
 
     public static Map<String,Object> objectToMap(Object obj) throws Exception{

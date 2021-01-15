@@ -18,17 +18,35 @@
 
 package com.dtstack.flink.sql.util;
 
+import com.dtstack.flink.sql.side.AbstractSideTableInfo;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.Lists;
+import org.apache.commons.lang3.StringUtils;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.api.java.typeutils.RowTypeInfo;
 import org.apache.flink.shaded.guava18.com.google.common.base.Splitter;
 import org.apache.flink.table.api.Types;
+import org.apache.flink.table.types.DataType;
+import org.apache.flink.table.types.logical.DecimalType;
+import org.apache.flink.table.types.utils.TypeConversions;
+import org.apache.flink.types.Row;
 
+import java.math.BigDecimal;
+import java.sql.Timestamp;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
+import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
+import java.util.stream.IntStream;
+import java.util.stream.Stream;
+
+import static org.apache.flink.table.api.DataTypes.DECIMAL;
+import static org.apache.flink.table.api.DataTypes.TIMESTAMP;
+
 
 /**
  * @program: flink.sql
@@ -39,36 +57,23 @@ public class DataTypeUtils {
 
     private final static Pattern COMPOSITE_TYPE_PATTERN = Pattern.compile("(.+?)<(.+)>");
     private final static String ARRAY = "ARRAY";
+    private final static String MAP = "MAP";
     private final static String ROW = "ROW";
     private final static char FIELD_DELIMITER = ',';
     private final static char TYPE_DELIMITER = ' ';
 
-    private DataTypeUtils() {}
-
-    /**
-     * 现在只支持ARRAY类型后续可以加入 MAP等类型
-     * @param compositeTypeString
-     * @return
-     */
-    public static TypeInformation convertToCompositeType(String compositeTypeString) {
-        Matcher matcher = matchCompositeType(compositeTypeString);
-        final String errorMsg = "type " + compositeTypeString + "is not support!";
-        Preconditions.checkState(matcher.find(), errorMsg);
-
-        String normalizedType = normalizeType(matcher.group(1));
-        Preconditions.checkState(ARRAY.equals(normalizedType), errorMsg);
-
-        return convertToArray(compositeTypeString);
+    private DataTypeUtils() {
     }
 
     /**
      * 目前ARRAY里只支持ROW和其他基本类型
+     *
      * @param arrayTypeString
      * @return
      */
     public static TypeInformation convertToArray(String arrayTypeString) {
         Matcher matcher = matchCompositeType(arrayTypeString);
-        final String errorMsg =  arrayTypeString + "convert to array type error!";
+        final String errorMsg = arrayTypeString + "convert to array type error!";
         Preconditions.checkState(matcher.find(), errorMsg);
 
         String normalizedType = normalizeType(matcher.group(1));
@@ -87,7 +92,32 @@ public class DataTypeUtils {
     }
 
     /**
+     * 目前Map里只支持基本类型
+     * @param mapTypeString
+     * @return
+     */
+    public static TypeInformation convertToMap(String mapTypeString) {
+        Matcher matcher = matchCompositeType(mapTypeString);
+        final String errorMsg =  mapTypeString + "convert to map type error!";
+        Preconditions.checkState(matcher.find(), errorMsg);
+
+        String normalizedType = normalizeType(matcher.group(1));
+        Preconditions.checkState(MAP.equals(normalizedType), errorMsg);
+
+        String kvTypeString = matcher.group(2);
+        String[] kvTypeStringList = StringUtils.split(kvTypeString, ",");
+        final String mapTypeErrorMsg = "There can only be key and value two types in map declaration.";
+        Preconditions.checkState(kvTypeStringList.length == 2, mapTypeErrorMsg);
+        String keyTypeString = normalizeType(kvTypeStringList[0]);
+        String valueTypeString = normalizeType(kvTypeStringList[1]);
+        TypeInformation keyType = convertToAtomicType(keyTypeString);
+        TypeInformation valueType = convertToAtomicType(valueTypeString);
+        return Types.MAP(keyType, valueType);
+    }
+
+    /**
      * 目前ROW里只支持基本类型
+     *
      * @param rowTypeString
      */
     public static RowTypeInfo convertToRow(String rowTypeString) {
@@ -103,6 +133,41 @@ public class DataTypeUtils {
         Tuple2<TypeInformation[], String[]> info = genFieldInfo(fieldInfoStrs);
         return new RowTypeInfo(info.f0, info.f1);
     }
+
+    /**
+     * class 转成 TypeInformation
+     *
+     * @param fieldTypes
+     * @return
+     */
+    public static TypeInformation[] transformTypes(Class[] fieldTypes) {
+        TypeInformation[] types = new TypeInformation[fieldTypes.length];
+        for (int i = 0; i < fieldTypes.length; i++) {
+            types[i] = TypeInformation.of(fieldTypes[i]);
+        }
+
+        return types;
+    }
+
+    /**
+     * class 转成 TypeInformation<Row>
+     *
+     * @param fieldTypes
+     * @param fieldClasses
+     * @return
+     */
+    public static TypeInformation<Row> getRowTypeInformation(String[] fieldTypes, Class<?>[] fieldClasses) {
+        TypeInformation[] types =
+                IntStream.range(0, fieldClasses.length)
+                        .mapToObj(i -> {
+                            return TypeInformation.of(fieldClasses[i]);
+                        })
+                        .toArray(TypeInformation[]::new);
+
+
+        return new RowTypeInfo(types, fieldTypes);
+    }
+
 
     private static Tuple2<TypeInformation[], String[]> genFieldInfo(Iterable<String> fieldInfoStrs) {
         ArrayList<TypeInformation> types = Lists.newArrayList();
@@ -125,6 +190,7 @@ public class DataTypeUtils {
 
     /**
      * 转换基本类型，所有类型参考Flink官方文档，一共12个基本类型。
+     *
      * @param string
      * @return
      */
@@ -164,19 +230,129 @@ public class DataTypeUtils {
         }
     }
 
+    /**
+     * 获取维表物理字段名称对应的类型
+     * 如果primaryKeys中的字段不在表字段中：如hbase的rowkey。则也需要将该字段加上默认string类型，否则join语法不通过
+     *
+     * @param sideTableInfo
+     * @return
+     */
+    public static String[] getPhysicalFieldTypes(AbstractSideTableInfo sideTableInfo) {
+        String[] fieldTypes = sideTableInfo.getFieldTypes();
+        String[] fieldNames = getFieldNames(sideTableInfo);
+
+        if (fieldNames.length == fieldTypes.length) {
+            return fieldTypes;
+        }
+
+        String[] newFieldTypes = new String[fieldNames.length];
+        for (int i = 0; i < fieldNames.length; i++) {
+            if (i >= fieldTypes.length) {
+                newFieldTypes[i] = "varchar";
+                continue;
+            }
+            newFieldTypes[i] = fieldTypes[i];
+        }
+        return newFieldTypes;
+    }
+
+    /**
+     * 获取维表物理字段名称
+     * 如果primaryKeys中的字段不在表字段中：如hbase的rowkey。则也需要将该字段加上，否则join语法不通过
+     *
+     * @param sideTableInfo
+     * @return
+     */
+    public static String[] getPhysicalFieldNames(AbstractSideTableInfo sideTableInfo) {
+        String[] fieldNames = getFieldNames(sideTableInfo);
+        Map<String, String> physicalFields = sideTableInfo.getPhysicalFields();
+        List<String> columns = Stream.of(fieldNames)
+                .map(x -> physicalFields.getOrDefault(x, x))
+                .collect(Collectors.toList());
+
+        String[] columnsArr = new String[columns.size()];
+        return columns.toArray(columnsArr);
+    }
+
+    /**
+     * 获取维表字段名称
+     * 如果primaryKeys中的字段不在表字段中：如hbase的rowkey。则也需要将改字段加上，否则join语法不通过
+     *
+     * @param sideTableInfo
+     * @return
+     */
+    public static String[] getFieldNames(AbstractSideTableInfo sideTableInfo) {
+        List<String> fieldsList = new ArrayList<>(Arrays.asList(sideTableInfo.getFields()));
+        Map<String, String> physicalFields = sideTableInfo.getPhysicalFields();
+
+        sideTableInfo
+                .getPrimaryKeys()
+                .stream()
+                .filter(p -> !physicalFields.containsKey(p) && !physicalFields.containsValue(p))
+                .forEach(p -> fieldsList.add(p));
+
+        return fieldsList.toArray(new String[fieldsList.size()]);
+    }
+
+    /**
+     * 获取维表字段类型
+     * java数据类型转换成DataType
+     *
+     * @param sideTableInfo
+     * @return
+     */
+    public static DataType[] getFieldTypes(AbstractSideTableInfo sideTableInfo) {
+        Class[] fieldClasses = completionFieldTypes(getFieldNames(sideTableInfo), sideTableInfo.getFieldClasses());
+        DataType[] dataTypes = new DataType[fieldClasses.length];
+        for (int i = 0; i < fieldClasses.length; i++) {
+            if (fieldClasses[i].getName().equals(BigDecimal.class.getName())) {
+                dataTypes[i] = DECIMAL(DecimalType.MAX_PRECISION, 18);
+                continue;
+            }
+            if (fieldClasses[i].getName().equals(Timestamp.class.getName())) {
+                dataTypes[i] = TIMESTAMP(3);
+                continue;
+            }
+            dataTypes[i] = TypeConversions.fromClassToDataType(fieldClasses[i]).get();
+        }
+        return dataTypes;
+    }
+
+    /**
+     * 补全primaryKey中存在，但是在fields不存在的字段的类型，默认为String
+     *
+     * @param fieldNames
+     * @param fieldTypes
+     * @return
+     */
+    private static Class[] completionFieldTypes(String[] fieldNames, Class[] fieldTypes) {
+        if (fieldNames.length == fieldTypes.length) {
+            return fieldTypes;
+        }
+        Class[] compFieldTypes = new Class[fieldNames.length];
+        for (int i = 0; i < fieldNames.length; i++) {
+            if (i >= fieldTypes.length) {
+                compFieldTypes[i] = String.class;
+                continue;
+            }
+            compFieldTypes[i] = fieldTypes[i];
+        }
+        return compFieldTypes;
+    }
+
     private static Iterable<String> splitTypeInfo(String string) {
         return Splitter
-            .on(TYPE_DELIMITER)
-            .trimResults()
-            .omitEmptyStrings()
-            .split(string);
+                .on(TYPE_DELIMITER)
+                .trimResults()
+                .omitEmptyStrings()
+                .split(string);
     }
 
     private static Iterable<String> splitCompositeTypeField(String string) {
         return Splitter
-            .on(FIELD_DELIMITER)
-            .trimResults()
-            .split(string);
+                .on(FIELD_DELIMITER)
+                .trimResults()
+                .split(string);
     }
 
     private static String replaceBlank(String s) {
@@ -185,7 +361,7 @@ public class DataTypeUtils {
 
     private static Matcher matchCompositeType(String s) {
         return COMPOSITE_TYPE_PATTERN.matcher(
-            replaceBlank(s)
+                replaceBlank(s)
         );
     }
 

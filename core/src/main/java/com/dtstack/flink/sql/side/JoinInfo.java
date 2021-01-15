@@ -25,7 +25,6 @@ import com.google.common.collect.HashBasedTable;
 import com.google.common.collect.Maps;
 import org.apache.calcite.sql.JoinType;
 import org.apache.calcite.sql.SqlNode;
-import com.google.common.base.Strings;
 
 import java.io.Serializable;
 import java.util.Map;
@@ -55,15 +54,15 @@ public class JoinInfo implements Serializable {
 
     private String rightTableAlias;
 
-    private SqlNode leftNode;
+    private transient SqlNode leftNode;
 
-    private SqlNode rightNode;
+    private transient SqlNode rightNode;
 
-    private SqlNode condition;
+    private transient SqlNode condition;
 
-    private SqlNode selectFields;
+    private transient SqlNode selectFields;
 
-    private SqlNode selectNode;
+    private transient SqlNode selectNode;
 
     private JoinType joinType;
 

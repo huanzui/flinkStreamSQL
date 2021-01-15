@@ -16,11 +16,14 @@
  * limitations under the License.
  */
 
- 
+
 
 package com.dtstack.flink.sql.sink.elasticsearch;
 
+import com.dtstack.flink.sql.sink.IStreamSinkGener;
+import com.dtstack.flink.sql.sink.elasticsearch.table.ElasticsearchTableInfo;
 import com.dtstack.flink.sql.table.AbstractTargetTableInfo;
+import org.apache.commons.lang3.StringUtils;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.api.java.typeutils.RowTypeInfo;
@@ -31,20 +34,12 @@ import org.apache.flink.streaming.api.functions.sink.RichSinkFunction;
 import org.apache.flink.table.sinks.RetractStreamTableSink;
 import org.apache.flink.table.sinks.TableSink;
 import org.apache.flink.types.Row;
-
-import com.dtstack.flink.sql.sink.IStreamSinkGener;
-import com.dtstack.flink.sql.sink.elasticsearch.table.ElasticsearchTableInfo;
-import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 
 /**
  * table output elastic5plugin
@@ -75,7 +70,9 @@ public class ElasticsearchSink implements RetractStreamTableSink<Row>, IStreamSi
 
     private TypeInformation[] fieldTypes;
 
-    private int parallelism = -1;
+    private int parallelism = 1;
+
+    protected String registerTableName;
 
     private ElasticsearchTableInfo esTableInfo;
 
@@ -135,8 +132,6 @@ public class ElasticsearchSink implements RetractStreamTableSink<Row>, IStreamSi
 
         boolean authMesh = esTableInfo.isAuthMesh();
         if (authMesh) {
-            String username = esTableInfo.getUserName();
-            String password = esTableInfo.getPassword();
             String authPassword = esTableInfo.getUserName() + ":" + esTableInfo.getPassword();
             userConfig.put("xpack.security.user", authPassword);
         }
@@ -147,23 +142,14 @@ public class ElasticsearchSink implements RetractStreamTableSink<Row>, IStreamSi
     }
 
     @Override
-    public void emitDataStream(DataStream<Tuple2<Boolean, Row>> dataStream) {
-        consumeDataStream(dataStream);
-    }
-
-    @Override
     public DataStreamSink<Tuple2<Boolean, Row>> consumeDataStream(DataStream<Tuple2<Boolean, Row>> dataStream) {
         RichSinkFunction richSinkFunction = createEsSinkFunction();
-        DataStreamSink streamSink = dataStream.addSink(richSinkFunction);
+        DataStreamSink streamSink = dataStream.addSink(richSinkFunction).name(registerTableName);
         if(parallelism > 0){
             streamSink.setParallelism(parallelism);
         }
 
         return streamSink;
-    }
-
-    public void setParallelism(int parallelism) {
-        this.parallelism = parallelism;
     }
 
     public void setBulkFlushMaxActions(int bulkFlushMaxActions) {
@@ -183,6 +169,9 @@ public class ElasticsearchSink implements RetractStreamTableSink<Row>, IStreamSi
         String id = elasticsearchTableInfo.getId();
         String[] idField = StringUtils.split(id, ",");
         idIndexList = new ArrayList<>();
+        registerTableName = elasticsearchTableInfo.getName();
+        parallelism = Objects.isNull(elasticsearchTableInfo.getParallelism()) ?
+                parallelism : elasticsearchTableInfo.getParallelism();
 
         for(int i = 0; i < idField.length; ++i) {
             idIndexList.add(Integer.valueOf(idField[i]));

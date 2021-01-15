@@ -18,6 +18,7 @@
 
 package com.dtstack.flink.sql.source.kafka;
 
+import com.dtstack.flink.sql.dirtyManager.manager.DirtyDataManager;
 import com.dtstack.flink.sql.format.DeserializationMetricWrapper;
 import org.apache.flink.api.common.serialization.DeserializationSchema;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
@@ -37,14 +38,13 @@ import java.lang.reflect.Field;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 
-import static com.dtstack.flink.sql.metric.MetricConstant.DT_PARTITION_GROUP;
-import static com.dtstack.flink.sql.metric.MetricConstant.DT_TOPIC_GROUP;
-import static com.dtstack.flink.sql.metric.MetricConstant.DT_TOPIC_PARTITION_LAG_GAUGE;
+import static com.dtstack.flink.sql.metric.MetricConstant.*;
 
 /**
  * add metric for source
  * <p>
  * company: www.dtstack.com
+ *
  * @author: toutian
  * create: 2019/12/24
  */
@@ -58,8 +58,12 @@ public class KafkaDeserializationMetricWrapper extends DeserializationMetricWrap
 
     private Calculate calculate;
 
-    public KafkaDeserializationMetricWrapper(TypeInformation<Row> typeInfo, DeserializationSchema<Row> deserializationSchema, Calculate calculate) {
-        super(typeInfo, deserializationSchema);
+    public KafkaDeserializationMetricWrapper(
+            TypeInformation<Row> typeInfo
+            , DeserializationSchema<Row> deserializationSchema
+            , Calculate calculate
+            , DirtyDataManager dirtyDataManager) {
+        super(typeInfo, deserializationSchema, dirtyDataManager);
         this.calculate = calculate;
     }
 
@@ -105,12 +109,7 @@ public class KafkaDeserializationMetricWrapper extends DeserializationMetricWrap
         for (TopicPartition topicPartition : assignedPartitions) {
             MetricGroup metricGroup = getRuntimeContext().getMetricGroup().addGroup(DT_TOPIC_GROUP, topicPartition.topic())
                     .addGroup(DT_PARTITION_GROUP, topicPartition.partition() + "");
-            metricGroup.gauge(DT_TOPIC_PARTITION_LAG_GAUGE, new Gauge<Long>() {
-                @Override
-                public Long getValue() {
-                    return calculate.calc(subscriptionState, topicPartition);
-                }
-            });
+            metricGroup.gauge(DT_TOPIC_PARTITION_LAG_GAUGE, (Gauge<Long>) () -> calculate.calc(subscriptionState, topicPartition));
         }
     }
 
@@ -118,7 +117,7 @@ public class KafkaDeserializationMetricWrapper extends DeserializationMetricWrap
         this.fetcher = fetcher;
     }
 
-    private Field getConsumerThreadField(AbstractFetcher fetcher) throws NoSuchFieldException {
+    protected Field getConsumerThreadField(AbstractFetcher fetcher) throws NoSuchFieldException {
         try {
             return fetcher.getClass().getDeclaredField("consumerThread");
         } catch (Exception e) {

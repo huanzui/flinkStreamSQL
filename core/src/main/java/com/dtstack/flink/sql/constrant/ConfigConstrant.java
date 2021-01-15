@@ -43,6 +43,8 @@ public class ConfigConstrant {
 
     public static final String FLINK_CHECKPOINT_CLEANUPMODE_KEY = "flink.checkpoint.cleanup.mode";
 
+    public static final String SQL_UNALIGNED_CHECKPOINTS = "sql.checkpoint.unalignedCheckpoints";
+
     public static final String SQL_ENV_PARALLELISM = "sql.env.parallelism";
 
     public static final String SQL_MAX_ENV_PARALLELISM = "sql.max.env.parallelism";
@@ -55,6 +57,9 @@ public class ConfigConstrant {
     public static final String FLINK_TIME_CHARACTERISTIC_KEY = "time.characteristic";
     // default 200ms
     public static final String AUTO_WATERMARK_INTERVAL_KEY = "autoWatermarkInterval";
+
+    // window early trigger
+    public static final String EARLY_TRIGGER = "early.trigger";
 
     public static final String SQL_TTL_MINTIME = "sql.ttl.min";
     public static final String SQL_TTL_MAXTIME = "sql.ttl.max";

@@ -20,6 +20,8 @@
 
 package com.dtstack.flink.sql.side;
 
+import com.dtstack.flink.sql.exception.sqlparse.PlannerNotMatchException;
+import com.dtstack.flink.sql.exception.sqlparse.WithoutTableNameException;
 import com.dtstack.flink.sql.parser.FlinkPlanner;
 import com.dtstack.flink.sql.util.TableUtils;
 import com.google.common.collect.Maps;
@@ -37,10 +39,8 @@ import org.apache.calcite.sql.SqlSelect;
 import org.apache.calcite.sql.SqlWith;
 import org.apache.calcite.sql.SqlWithItem;
 import org.apache.calcite.sql.parser.SqlParseException;
-import org.apache.calcite.sql.parser.SqlParser;
 import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.table.api.Table;
-import org.apache.flink.table.planner.calcite.FlinkPlannerImpl;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -48,6 +48,7 @@ import java.util.Map;
 import java.util.Queue;
 import java.util.Set;
 
+import static com.dtstack.flink.sql.exception.sqlparse.SqlParseCodeEnum.PLANNER_NOT_MATCH2;
 import static org.apache.calcite.sql.SqlKind.IDENTIFIER;
 import static org.apache.calcite.sql.SqlKind.LITERAL;
 
@@ -73,7 +74,11 @@ public class SideSQLParser {
         Queue<Object> queueInfo = Queues.newLinkedBlockingQueue();
         SqlNode sqlNode = flinkPlanner.getParser().parse(exeSql);
 
-        parseSql(sqlNode, sideTableSet, queueInfo, null, null, null, scope, Sets.newHashSet());
+        try {
+            parseSql(sqlNode, sideTableSet, queueInfo, null, null, null, scope, Sets.newHashSet());
+        }catch (WithoutTableNameException e){
+            throw new WithoutTableNameException(e.getMessage()+ "\n==sql==\n"+ exeSql);
+        }
         queueInfo.offer(sqlNode);
         return queueInfo;
     }
@@ -172,6 +177,10 @@ public class SideSQLParser {
 
             case LITERAL:
                 return LITERAL.toString();
+
+            case SNAPSHOT:
+                throw new PlannerNotMatchException(PLANNER_NOT_MATCH2.getDescription());
+
             default:
                 break;
         }

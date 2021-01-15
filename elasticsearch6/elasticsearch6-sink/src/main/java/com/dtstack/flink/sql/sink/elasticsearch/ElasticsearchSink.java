@@ -18,7 +18,11 @@
 
 package com.dtstack.flink.sql.sink.elasticsearch;
 
+import com.dtstack.flink.sql.sink.IStreamSinkGener;
+import com.dtstack.flink.sql.sink.elasticsearch.table.ElasticsearchTableInfo;
 import com.dtstack.flink.sql.table.AbstractTargetTableInfo;
+import com.google.common.collect.Maps;
+import org.apache.commons.lang.StringUtils;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.api.java.typeutils.RowTypeInfo;
@@ -29,15 +33,12 @@ import org.apache.flink.streaming.api.functions.sink.RichSinkFunction;
 import org.apache.flink.table.sinks.RetractStreamTableSink;
 import org.apache.flink.table.sinks.TableSink;
 import org.apache.flink.types.Row;
-
-import com.dtstack.flink.sql.sink.IStreamSinkGener;
-import com.dtstack.flink.sql.sink.elasticsearch.table.ElasticsearchTableInfo;
-import com.google.common.collect.Maps;
-import org.apache.commons.lang.StringUtils;
 import org.apache.http.HttpHost;
+
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.stream.Collectors;
 
 /**
@@ -67,7 +68,9 @@ public class ElasticsearchSink implements RetractStreamTableSink<Row>, IStreamSi
 
     private TypeInformation[] fieldTypes;
 
-    private int parallelism = -1;
+    private int parallelism = 1;
+
+    protected String registerTableName;
 
     private ElasticsearchTableInfo esTableInfo;
 
@@ -119,11 +122,6 @@ public class ElasticsearchSink implements RetractStreamTableSink<Row>, IStreamSi
     }
 
     @Override
-    public void emitDataStream(DataStream<Tuple2<Boolean, Row>> dataStream) {
-        consumeDataStream(dataStream);
-    }
-
-    @Override
     public DataStreamSink<?> consumeDataStream(DataStream<Tuple2<Boolean, Row>> dataStream) {
         RichSinkFunction richSinkFunction = createEsSinkFunction();
         DataStreamSink streamSink = dataStream.addSink(richSinkFunction);
@@ -142,6 +140,8 @@ public class ElasticsearchSink implements RetractStreamTableSink<Row>, IStreamSi
         columnTypes = esTableInfo.getFieldTypes();
         esAddressList = Arrays.asList(esTableInfo.getAddress().split(","));
         String id = esTableInfo.getId();
+        registerTableName = esTableInfo.getName();
+        parallelism = Objects.isNull(esTableInfo.getParallelism()) ? parallelism : esTableInfo.getParallelism();
 
         if (!StringUtils.isEmpty(id)) {
             idIndexList = Arrays.stream(StringUtils.split(id, ",")).map(Integer::valueOf).collect(Collectors.toList());

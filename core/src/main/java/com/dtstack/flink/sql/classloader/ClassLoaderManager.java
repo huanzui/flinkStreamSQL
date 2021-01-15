@@ -31,8 +31,10 @@ import java.net.URLClassLoader;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
@@ -45,9 +47,24 @@ public class ClassLoaderManager {
     private static final Logger LOG = LoggerFactory.getLogger(ClassLoaderManager.class);
 
     private static Map<String, DtClassLoader> pluginClassLoader = new ConcurrentHashMap<>();
+    // 维表插件的classloader，该集合存放的是AppClassloader
+    private static Map<String, URLClassLoader> pluginAppClassLoader = new ConcurrentHashMap<>();
 
     public static <R> R newInstance(String pluginJarPath, ClassLoaderSupplier<R> supplier) throws Exception {
         ClassLoader classLoader = retrieveClassLoad(pluginJarPath);
+        return ClassLoaderSupplierCallBack.callbackAndReset(supplier, classLoader);
+    }
+
+    /**
+     * 使用AppClassloader实例化维表插件
+     * @param pluginJarPath 插件路径
+     * @param supplier 类加载器
+     * @param <R>
+     * @return
+     * @throws Exception
+     */
+    public static <R> R newAppInstance(String pluginJarPath, ClassLoaderSupplier<R> supplier) throws Exception {
+        ClassLoader classLoader = retrieveAppClassLoad(pluginJarPath);
         return ClassLoaderSupplierCallBack.callbackAndReset(supplier, classLoader);
     }
 
@@ -62,6 +79,27 @@ public class ClassLoaderManager {
                 URL[] urls = PluginUtil.getPluginJarUrls(pluginJarPath);
                 ClassLoader parentClassLoader = Thread.currentThread().getContextClassLoader();
                 DtClassLoader classLoader = new DtClassLoader(urls, parentClassLoader);
+                LOG.info("pluginJarPath:{} create ClassLoad successful...", pluginJarPath);
+                return classLoader;
+            } catch (Throwable e) {
+                LOG.error("retrieve ClassLoad happens error", e);
+                throw new RuntimeException("retrieve ClassLoad happens error");
+            }
+        });
+    }
+
+    /**
+     * 使用AppClassloader加载维表插件
+     * @param pluginJarPath 插件路径
+     * @return
+     */
+    private static URLClassLoader retrieveAppClassLoad(String pluginJarPath) {
+        return pluginAppClassLoader.computeIfAbsent(pluginJarPath, k -> {
+            try {
+                URL[] urls = PluginUtil.getPluginJarUrls(pluginJarPath);
+                ClassLoader parentClassLoader = Thread.currentThread().getContextClassLoader();
+                List<URL> jarUrlList = Arrays.asList(urls);
+                URLClassLoader classLoader = loadExtraJar(jarUrlList, (URLClassLoader) parentClassLoader);
                 LOG.info("pluginJarPath:{} create ClassLoad successful...", pluginJarPath);
                 return classLoader;
             } catch (Throwable e) {
@@ -93,6 +131,12 @@ public class ClassLoaderManager {
         for (Map.Entry<String, DtClassLoader> entry : pluginClassLoader.entrySet()) {
             classPaths.addAll(Arrays.asList(entry.getValue().getURLs()));
         }
+
+        Set<URL> appClassPaths = new HashSet<URL>();
+        for(Map.Entry<String, URLClassLoader> entry : pluginAppClassLoader.entrySet()){
+            appClassPaths.addAll(Arrays.asList(entry.getValue().getURLs()));
+        }
+        classPaths.addAll(appClassPaths);
         return classPaths;
     }
 

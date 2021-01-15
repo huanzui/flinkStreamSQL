@@ -72,7 +72,7 @@ public abstract class AbstractRdbSink implements RetractStreamTableSink<Row>, Se
 
     private TypeInformation[] fieldTypes;
 
-    private int parallelism = -1;
+    private int parallelism = 1;
 
     protected String schema;
 
@@ -113,12 +113,6 @@ public abstract class AbstractRdbSink implements RetractStreamTableSink<Row>, Se
         this.fieldTypeList = rdbTableInfo.getFieldTypeList();
         this.fieldExtraInfoList = rdbTableInfo.getFieldExtraInfoList();
         return this;
-    }
-
-
-    @Override
-    public void emitDataStream(DataStream<Tuple2<Boolean, Row>> dataStream) {
-        consumeDataStream(dataStream);
     }
 
     @Override

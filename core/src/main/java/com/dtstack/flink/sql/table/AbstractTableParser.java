@@ -17,25 +17,27 @@
  */
 
 
-
 package com.dtstack.flink.sql.table;
 
 import com.dtstack.flink.sql.util.ClassUtil;
 import com.dtstack.flink.sql.util.DtStringUtil;
 import com.google.common.base.Preconditions;
-import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import org.apache.commons.lang3.StringUtils;
+import org.apache.flink.api.java.tuple.Tuple2;
 
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 /**
  * Reason:
  * Date: 2018/7/4
  * Company: www.dtstack.com
+ *
  * @author xuchao
  */
 
@@ -45,10 +47,12 @@ public abstract class AbstractTableParser {
     private static final String NEST_JSON_FIELD_KEY = "nestFieldKey";
     private static final String CHAR_TYPE_NO_LENGTH = "CHAR";
 
-    private static Pattern primaryKeyPattern = Pattern.compile("(?i)PRIMARY\\s+KEY\\s*\\((.*)\\)");
-    private static Pattern nestJsonFieldKeyPattern = Pattern.compile("(?i)((@*\\S+\\.)*\\S+)\\s+(.+?)\\s+AS\\s+(\\w+)(\\s+NOT\\s+NULL)?$");
-    private static Pattern physicalFieldFunPattern = Pattern.compile("\\w+\\((\\w+)\\)$");
-    private static Pattern charTypePattern = Pattern.compile("(?i)CHAR\\((\\d*)\\)$");
+    private static final Pattern primaryKeyPattern = Pattern.compile("(?i)(^\\s*)PRIMARY\\s+KEY\\s*\\((.*)\\)");
+    private static final Pattern nestJsonFieldKeyPattern = Pattern.compile("(?i)((@*\\S+\\.)*\\S+)\\s+(.+?)\\s+AS\\s+(\\w+)(\\s+NOT\\s+NULL)?$");
+    private static final Pattern physicalFieldFunPattern = Pattern.compile("\\w+\\((\\w+)\\)$");
+    private static final Pattern charTypePattern = Pattern.compile("(?i)CHAR\\((\\d*)\\)$");
+    private static final Pattern typePattern = Pattern.compile("(\\S+)\\s+(\\w+.*)");
+
 
     private Map<String, Pattern> patternMap = Maps.newHashMap();
 
@@ -65,14 +69,14 @@ public abstract class AbstractTableParser {
 
     public abstract AbstractTableInfo getTableInfo(String tableName, String fieldsInfo, Map<String, Object> props) throws Exception;
 
-    public boolean dealKeyPattern(String fieldRow, AbstractTableInfo tableInfo){
-        for(Map.Entry<String, Pattern> keyPattern : patternMap.entrySet()){
+    public boolean dealKeyPattern(String fieldRow, AbstractTableInfo tableInfo) {
+        for (Map.Entry<String, Pattern> keyPattern : patternMap.entrySet()) {
             Pattern pattern = keyPattern.getValue();
             String key = keyPattern.getKey();
             Matcher matcher = pattern.matcher(fieldRow);
-            if(matcher.find()){
+            if (matcher.find()) {
                 ITableFieldDealHandler handler = handlerMap.get(key);
-                if(handler == null){
+                if (handler == null) {
                     throw new RuntimeException("parse field [" + fieldRow + "] error.");
                 }
 
@@ -88,42 +92,36 @@ public abstract class AbstractTableParser {
 
         List<String> fieldRows = DtStringUtil.splitField(fieldsInfo);
 
-        for (String fieldRow : fieldRows) {
-            fieldRow = fieldRow.trim();
+        for (int i = 0; i < fieldRows.size(); i++) {
+            String fieldRow = fieldRows.get(i).trim();
 
             if (StringUtils.isBlank(fieldRow)) {
-                throw new RuntimeException(String.format("table [%s],exists field empty.", tableInfo.getName()));
+                throw new RuntimeException(String.format("Empty field appears in position [%s] in table [%s]",
+                        i + 1, tableInfo.getName()));
             }
-
-            String[] fieldInfoArr = fieldRow.split("\\s+");
-
-            String errorMsg = String.format("table [%s] field [%s] format error.", tableInfo.getName(), fieldRow);
-            Preconditions.checkState(fieldInfoArr.length >= 2, errorMsg);
 
             boolean isMatcherKey = dealKeyPattern(fieldRow, tableInfo);
             if (isMatcherKey) {
                 continue;
             }
 
-            //Compatible situation may arise in space in the fieldName
-            String[] filedNameArr = new String[fieldInfoArr.length - 1];
-            System.arraycopy(fieldInfoArr, 0, filedNameArr, 0, fieldInfoArr.length - 1);
-            String fieldName = String.join(" ", filedNameArr);
-            String fieldType = fieldInfoArr[fieldInfoArr.length - 1 ].trim();
+            Tuple2<String, String> t = extractType(fieldRow, tableInfo.getName());
+            String fieldName = t.f0;
+            String fieldType = t.f1;
 
-            Class fieldClass = null;
+            Class fieldClass;
             AbstractTableInfo.FieldExtraInfo fieldExtraInfo = null;
 
             Matcher matcher = charTypePattern.matcher(fieldType);
             if (matcher.find()) {
                 fieldClass = dbTypeConvertToJavaType(CHAR_TYPE_NO_LENGTH);
                 fieldExtraInfo = new AbstractTableInfo.FieldExtraInfo();
-                fieldExtraInfo.setLength(Integer.valueOf(matcher.group(1)));
+                fieldExtraInfo.setLength(Integer.parseInt(matcher.group(1)));
             } else {
                 fieldClass = dbTypeConvertToJavaType(fieldType);
             }
 
-            tableInfo.addPhysicalMappings(fieldInfoArr[0], fieldInfoArr[0]);
+            tableInfo.addPhysicalMappings(fieldName, fieldName);
             tableInfo.addField(fieldName);
             tableInfo.addFieldClass(fieldClass);
             tableInfo.addFieldType(fieldType);
@@ -133,15 +131,30 @@ public abstract class AbstractTableParser {
         tableInfo.finish();
     }
 
+    private Tuple2<String, String> extractType(String fieldRow, String tableName) {
+        Matcher matcher = typePattern.matcher(fieldRow);
+        if (matcher.matches()) {
+            String fieldName = matcher.group(1);
+            String fieldType = matcher.group(2);
+            return Tuple2.of(fieldName, fieldType);
+        } else {
+            String errorMsg = String.format("table [%s] field [%s] format error.", tableName, fieldRow);
+            throw new RuntimeException(errorMsg);
+        }
+    }
+
     public void dealPrimaryKey(Matcher matcher, AbstractTableInfo tableInfo) {
-        String primaryFields = matcher.group(1).trim();
-        String[] splitArry = primaryFields.split(",");
-        List<String> primaryKes = Lists.newArrayList(splitArry);
-        tableInfo.setPrimaryKeys(primaryKes);
+        String primaryFields = matcher.group(2).trim();
+        List<String> primaryKeys = Arrays
+                .stream(primaryFields.split(","))
+                .map(String::trim)
+                .collect(Collectors.toList());
+        tableInfo.setPrimaryKeys(primaryKeys);
     }
 
     /**
      * add parser for alias field
+     *
      * @param matcher
      * @param tableInfo
      */

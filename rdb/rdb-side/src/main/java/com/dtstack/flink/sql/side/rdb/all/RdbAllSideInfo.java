@@ -34,9 +34,11 @@ import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.Arrays;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Collectors;
+import java.util.Map;
+import java.util.Objects;
 
 /**
  * Reason:
@@ -51,6 +53,9 @@ public class RdbAllSideInfo extends BaseSideInfo {
     private static final long serialVersionUID = -5858335638589472159L;
     private static final Logger LOG = LoggerFactory.getLogger(RdbAllSideInfo.class.getSimpleName());
 
+    public RdbAllSideInfo(AbstractSideTableInfo sideTableInfo, String[] lookupKeys) {
+        super(sideTableInfo, lookupKeys);
+    }
 
     public RdbAllSideInfo(RowTypeInfo rowTypeInfo, JoinInfo joinInfo, List<FieldInfo> outFieldInfoList, AbstractSideTableInfo sideTableInfo) {
         super(rowTypeInfo, joinInfo, outFieldInfoList, sideTableInfo);
@@ -59,8 +64,28 @@ public class RdbAllSideInfo extends BaseSideInfo {
     @Override
     public void buildEqualInfo(JoinInfo joinInfo, AbstractSideTableInfo sideTableInfo) {
         RdbSideTableInfo rdbSideTableInfo = (RdbSideTableInfo) sideTableInfo;
-        sqlCondition = getSelectFromStatement(getTableName(rdbSideTableInfo), Arrays.asList(StringUtils.split(sideSelectFields, ",")), sideTableInfo.getPredicateInfoes());
-        LOG.info("--------dimension sql query-------\n{}" + sqlCondition);
+        List<String> selectFields = Lists.newArrayList();
+        Map<String, String> physicalFields = rdbSideTableInfo.getPhysicalFields();
+        physicalFields.keySet().forEach(
+                item -> {
+                    if (Objects.isNull(physicalFields.get(item))) {
+                        selectFields.add(quoteIdentifier(item));
+                    } else {
+                        selectFields.add(quoteIdentifier(physicalFields.get(item)) + " AS " + quoteIdentifier(item));
+                    }
+                }
+        );
+        sqlCondition = getSelectFromStatement(getTableName(rdbSideTableInfo), selectFields, sideTableInfo.getPredicateInfoes());
+        LOG.info(String.format("--------dimension sql query: %s-------\n", sqlCondition));
+    }
+
+    @Override
+    public void buildEqualInfo(AbstractSideTableInfo sideTableInfo) {
+        super.buildEqualInfo(sideTableInfo);
+        RdbSideTableInfo rdbSideTableInfo = (RdbSideTableInfo) sideTableInfo;
+        // TODO flink table api必须将表定义所有字段数据加载
+        flinkPlannerSqlCondition = getSelectFromStatement(getTableName(rdbSideTableInfo), new ArrayList(sideTableInfo.getPhysicalFields().values()), sideTableInfo.getPredicateInfoes());
+        LOG.info(String.format("--------dimension sql query: %s-------\n", flinkPlannerSqlCondition));
     }
 
     public String getAdditionalWhereClause() {
@@ -68,7 +93,7 @@ public class RdbAllSideInfo extends BaseSideInfo {
     }
 
     private String getSelectFromStatement(String tableName, List<String> selectFields, List<PredicateInfo> predicateInfoes) {
-        String fromClause = selectFields.stream().map(this::quoteIdentifier).collect(Collectors.joining(", "));
+        String fromClause = String.join(", ", selectFields);
         String predicateClause = predicateInfoes.stream().map(this::buildFilterCondition).collect(Collectors.joining(" AND "));
         String whereClause = buildWhereClause(predicateClause);
         return "SELECT " + fromClause + " FROM " + tableName + whereClause;

@@ -73,8 +73,6 @@ public final class StreamEnvConfigManager {
 
         confProperties = PropertiesUtils.propertiesTrim(confProperties);
         streamEnv.getConfig().disableClosureCleaner();
-        // Disables reusing object
-        streamEnv.getConfig().enableObjectReuse();
 
         Configuration globalJobParameters = new Configuration();
         //Configuration unsupported set properties key-value
@@ -87,9 +85,11 @@ public final class StreamEnvConfigManager {
         ExecutionConfig exeConfig = streamEnv.getConfig();
         if (exeConfig.getGlobalJobParameters() == null) {
             exeConfig.setGlobalJobParameters(globalJobParameters);
-        } else if (exeConfig.getGlobalJobParameters() instanceof Configuration) {
-            ((Configuration) exeConfig.getGlobalJobParameters()).addAll(globalJobParameters);
+        } else if (exeConfig.getGlobalJobParameters() != null) {
+            exeConfig.setGlobalJobParameters(globalJobParameters);
         }
+
+        disableChainOperator(streamEnv, globalJobParameters);
 
         getEnvParallelism(confProperties).ifPresent(streamEnv::setParallelism);
         getMaxEnvParallelism(confProperties).ifPresent(streamEnv::setMaxParallelism);
@@ -119,7 +119,23 @@ public final class StreamEnvConfigManager {
             getCheckpointTimeout(confProperties).ifPresent(streamEnv.getCheckpointConfig()::setCheckpointTimeout);
             getMaxConcurrentCheckpoints(confProperties).ifPresent(streamEnv.getCheckpointConfig()::setMaxConcurrentCheckpoints);
             getCheckpointCleanup(confProperties).ifPresent(streamEnv.getCheckpointConfig()::enableExternalizedCheckpoints);
+            enableUnalignedCheckpoints(confProperties).ifPresent(event -> streamEnv.getCheckpointConfig().enableUnalignedCheckpoints(event));
             getStateBackend(confProperties).ifPresent(streamEnv::setStateBackend);
+        }
+    }
+
+    /**
+     * 设置TableEnvironment window提前触发
+     * @param tableEnv
+     * @param confProperties
+     */
+    public static void streamTableEnvironmentEarlyTriggerConfig(TableEnvironment tableEnv, Properties confProperties) {
+        confProperties = PropertiesUtils.propertiesTrim(confProperties);
+        String triggerTime = confProperties.getProperty(ConfigConstrant.EARLY_TRIGGER);
+        if (StringUtils.isNumeric(triggerTime)) {
+            TableConfig qConfig = tableEnv.getConfig();
+            qConfig.getConfiguration().setString("table.exec.emit.early-fire.enabled", "true");
+            qConfig.getConfiguration().setString("table.exec.emit.early-fire.delay", triggerTime+"s");
         }
     }
 
@@ -196,6 +212,14 @@ public final class StreamEnvConfigManager {
         boolean checkpointEnabled = !(properties.getProperty(ConfigConstrant.SQL_CHECKPOINT_INTERVAL_KEY) == null
                 && properties.getProperty(ConfigConstrant.FLINK_CHECKPOINT_INTERVAL_KEY) == null);
         return Optional.of(checkpointEnabled);
+    }
+
+    public static Optional<Boolean> enableUnalignedCheckpoints(Properties properties) {
+        String unalignedCheckpoints = properties.getProperty(ConfigConstrant.SQL_UNALIGNED_CHECKPOINTS);
+        if(!StringUtils.isEmpty(unalignedCheckpoints)){
+            return Optional.of(Boolean.valueOf(unalignedCheckpoints));
+        }
+        return Optional.empty();
     }
 
     public static Optional<Long> getCheckpointInterval(Properties properties) {
@@ -340,6 +364,12 @@ public final class StreamEnvConfigManager {
             return timeNumber * 1000L;
         } else {
             throw new RuntimeException("not support " + timeNumber + timeUnit);
+        }
+    }
+
+    private static void disableChainOperator(StreamExecutionEnvironment env, Configuration configuration) {
+        if(configuration.getBoolean("disableChainOperator", false)) {
+            env.disableOperatorChaining();
         }
     }
 }

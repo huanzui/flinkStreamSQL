@@ -23,6 +23,15 @@ import com.dtstack.flink.sql.exec.ExecuteProcessHelper;
 import com.dtstack.flink.sql.exec.ParamsInfo;
 import org.apache.commons.lang.exception.ExceptionUtils;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
+import org.apache.flink.table.api.bridge.java.StreamTableEnvironment;
+import org.apache.flink.table.api.bridge.java.internal.StreamTableEnvironmentImpl;
+
+import java.lang.reflect.Field;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import java.net.URL;
+import java.net.URLClassLoader;
 
 /**
  *  local模式获取sql任务的执行计划
@@ -32,16 +41,33 @@ import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
  */
 public class GetPlan {
 
+    private static final Logger LOG = LoggerFactory.getLogger(GetPlan.class);
+
     public static String getExecutionPlan(String[] args) {
+        ClassLoader currentClassLoader = Thread.currentThread().getContextClassLoader();
         try {
             long start = System.currentTimeMillis();
             ParamsInfo paramsInfo = ExecuteProcessHelper.parseParams(args);
-            StreamExecutionEnvironment env = ExecuteProcessHelper.getStreamExecution(paramsInfo);
+            paramsInfo.setGetPlan(true);
+
+            ClassLoader envClassLoader = StreamExecutionEnvironment.class.getClassLoader();
+            ClassLoader plannerClassLoader = URLClassLoader.newInstance(new URL[0], envClassLoader);
+            Thread.currentThread().setContextClassLoader(plannerClassLoader);
+
+            StreamTableEnvironment tableEnv = ExecuteProcessHelper.getStreamExecution(paramsInfo);
+            StreamTableEnvironmentImpl tableEnvImpl = (StreamTableEnvironmentImpl) tableEnv;
+            Field executionEnvironmentField = tableEnvImpl.getClass().getDeclaredField("executionEnvironment");
+            executionEnvironmentField.setAccessible(true);
+            StreamExecutionEnvironment env = (StreamExecutionEnvironment) executionEnvironmentField.get(tableEnvImpl);
+
             String executionPlan = env.getExecutionPlan();
             long end = System.currentTimeMillis();
             return ApiResult.createSuccessResultJsonStr(executionPlan, end - start);
         } catch (Exception e) {
+            LOG.error("Get plan error", e);
             return ApiResult.createErrorResultJsonStr(ExceptionUtils.getFullStackTrace(e));
+        } finally {
+            Thread.currentThread().setContextClassLoader(currentClassLoader);
         }
     }
 }

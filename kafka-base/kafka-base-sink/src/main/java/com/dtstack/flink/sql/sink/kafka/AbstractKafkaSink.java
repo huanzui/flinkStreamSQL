@@ -18,8 +18,10 @@
 
 package com.dtstack.flink.sql.sink.kafka;
 
+import com.dtstack.flink.sql.enums.EUpdateMode;
 import com.dtstack.flink.sql.sink.IStreamSinkGener;
 import com.dtstack.flink.sql.sink.kafka.table.KafkaSinkTableInfo;
+import com.dtstack.flink.sql.util.DataTypeUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.api.java.tuple.Tuple2;
@@ -37,6 +39,8 @@ import org.apache.flink.types.Row;
 import org.apache.flink.util.Preconditions;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 
+import java.util.Arrays;
+import java.util.HashMap;
 import java.util.Optional;
 import java.util.Properties;
 import java.util.stream.IntStream;
@@ -57,9 +61,10 @@ public abstract class AbstractKafkaSink implements RetractStreamTableSink<Row>, 
     protected String[] partitionKeys;
     protected String sinkOperatorName;
     protected Properties properties;
-    protected int parallelism;
+    protected int parallelism = -1;
     protected String topic;
     protected String tableName;
+    protected String updateMode;
 
     protected TableSchema schema;
     protected SinkFunction<Tuple2<Boolean,Row>> kafkaProducer011;
@@ -75,11 +80,21 @@ public abstract class AbstractKafkaSink implements RetractStreamTableSink<Row>, 
         }
         return props;
     }
-
+    // TODO Source有相同的方法日后可以合并
     protected TypeInformation[] getTypeInformations(KafkaSinkTableInfo kafka11SinkTableInfo) {
+        String[] fieldTypes = kafka11SinkTableInfo.getFieldTypes();
         Class<?>[] fieldClasses = kafka11SinkTableInfo.getFieldClasses();
         TypeInformation[] types = IntStream.range(0, fieldClasses.length)
-                .mapToObj(i -> TypeInformation.of(fieldClasses[i]))
+                .mapToObj(
+                    i -> {
+                        if (fieldClasses[i].isArray()) {
+                            return DataTypeUtils.convertToArray(fieldTypes[i]);
+                        }
+                        if (fieldClasses[i] == new HashMap().getClass()) {
+                            return DataTypeUtils.convertToMap(fieldTypes[i]);
+                        }
+                        return TypeInformation.of(fieldClasses[i]);
+                    })
                 .toArray(TypeInformation[]::new);
         return types;
     }
@@ -99,24 +114,27 @@ public abstract class AbstractKafkaSink implements RetractStreamTableSink<Row>, 
     }
 
     protected String[] getPartitionKeys(KafkaSinkTableInfo kafkaSinkTableInfo) {
-        if (StringUtils.isNotBlank(kafkaSinkTableInfo.getPartitionKeys())) {
-            return StringUtils.split(kafkaSinkTableInfo.getPartitionKeys(), ',');
+        String keysStr = kafkaSinkTableInfo.getPartitionKeys();
+        if (StringUtils.isNotBlank(keysStr)) {
+            String[] keys = StringUtils.split(keysStr, ",");
+            String[] cleanedKeys = Arrays.stream(keys)
+                .map(x -> x.trim())
+                .toArray(String[]::new);
+            return cleanedKeys;
         }
         return null;
     }
 
     @Override
     public DataStreamSink<Tuple2<Boolean, Row>> consumeDataStream(DataStream<Tuple2<Boolean, Row>> dataStream) {
+        if (updateMode.equalsIgnoreCase(EUpdateMode.APPEND.name())) {
+            dataStream = dataStream.filter((Tuple2<Boolean, Row> record) -> record.f0);
+        }
         DataStreamSink<Tuple2<Boolean, Row>> dataStreamSink = dataStream.addSink(kafkaProducer011).name(sinkOperatorName);
         if (parallelism > 0) {
             dataStreamSink.setParallelism(parallelism);
         }
         return dataStreamSink;
-    }
-
-    @Override
-    public void emitDataStream(DataStream<Tuple2<Boolean, Row>> dataStream) {
-        consumeDataStream(dataStream);
     }
 
     @Override
